@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QFontDatabase
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -85,7 +86,7 @@ class App(QWidget):
 
         self.video = VideoWidget(video_path)
         self.slider = self._build_slider()
-        self.frame_label = QLabel()
+        self.frame_label = self._build_frame_label()
         self.keyboard_help_label = QLabel("a/d shift 1 frame; A/D shift 10 frames")
         self.previous_match_btn = QPushButton("<< previous match")
         self.previous_match_btn.clicked.connect(self.go_to_previous_match)
@@ -116,6 +117,11 @@ class App(QWidget):
         slider.valueChanged.connect(self.on_slider_change)
         slider.setFocus()
         return slider
+
+    def _build_frame_label(self):
+        label = QLabel()
+        label.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        return label
 
     def _build_luminance_checkbox(self):
         checkbox = QCheckBox("Display percentage")
