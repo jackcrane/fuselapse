@@ -1,8 +1,6 @@
 # Fuselapse
 
-<video>
-  <source src="example-timelapse.mp4" type="video/mp4">
-</video>
+https://github.com/user-attachments/assets/6833d253-9724-4b90-8c14-e7c0da02bb88
 
 An unofficial application for generating smooth timelapse videos from a Formlabs Fuse series 3D printer.
 
