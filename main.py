@@ -27,6 +27,8 @@ CHECK_REGIONS = [
 BOX_SIZE = 40
 OUTPUT_FILE = "regions.json"
 MAX_SCREEN_RATIO = 0.82
+LUMINANCE_THRESHOLD_PCT = 15
+DEBUG_LUMINANCE = "--debug-luminance" in sys.argv
 
 
 class VideoWidget(QWidget):
@@ -66,6 +68,27 @@ class VideoWidget(QWidget):
         self.current_frame = 0
         self.dragging_idx = None
 
+    def get_region_bounds(self, region):
+        x1 = max(0, min(self.video_w, region["x"]))
+        y1 = max(0, min(self.video_h, region["y"]))
+        x2 = max(0, min(self.video_w, region["x"] + BOX_SIZE))
+        y2 = max(0, min(self.video_h, region["y"] + BOX_SIZE))
+        return x1, y1, x2, y2
+
+    def get_region_luminance_pct(self, region):
+        x1, y1, x2, y2 = self.get_region_bounds(region)
+        if x2 <= x1 or y2 <= y1:
+            return 0
+
+        roi = self.frame[y1:y2, x1:x2]
+        avg_bgr = roi.mean(axis=(0, 1))
+        avg_rgb = QColor(
+            int(avg_bgr[2]),
+            int(avg_bgr[1]),
+            int(avg_bgr[0]),
+        )
+        return round(avg_rgb.lightnessF() * 100)
+
     def set_frame(self, frame_index):
         self.current_frame = max(0, min(self.total_frames - 1, frame_index))
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
@@ -104,12 +127,28 @@ class VideoWidget(QWidget):
             color = QColor(0, 255, 0) if r["label"] == "positive" else QColor(255, 0, 0)
             painter.setPen(QPen(color, 2))
 
-            painter.drawRect(
-                int(r["x"] * self.scale),
-                int(r["y"] * self.scale),
-                int(BOX_SIZE * self.scale),
-                int(BOX_SIZE * self.scale),
-            )
+            draw_x = int(r["x"] * self.scale)
+            draw_y = int(r["y"] * self.scale)
+            draw_size = int(BOX_SIZE * self.scale)
+            luminance_pct = self.get_region_luminance_pct(r)
+
+            if luminance_pct < LUMINANCE_THRESHOLD_PCT:
+                fill_color = QColor(color)
+                fill_color.setAlphaF(0.5)
+                painter.fillRect(draw_x, draw_y, draw_size, draw_size, fill_color)
+
+            painter.drawRect(draw_x, draw_y, draw_size, draw_size)
+
+            if DEBUG_LUMINANCE:
+                text_rect = img.rect()
+                text_rect.setX(draw_x)
+                text_rect.setY(draw_y)
+                text_rect.setWidth(draw_size)
+                text_rect.setHeight(draw_size)
+
+                painter.fillRect(text_rect, QColor(0, 0, 0, 200))
+                painter.setPen(QPen(QColor(255, 255, 255)))
+                painter.drawText(text_rect, Qt.AlignCenter, f"{luminance_pct}%")
 
     def mousePressEvent(self, event):
         x = int(event.x() / self.scale)
