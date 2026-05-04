@@ -32,6 +32,7 @@ The procedure for adjusting settings is as follows:
 1. Load in the video as normal.
 2. Scrub to the second frame of the doser traveling across the print area from right to left. Make sure the right-most green box has the semi-transparent green fill, and the red box connected to it does not have a fill.
 3. Let the video progress until the doser is traveling across the print area from left to right. Do the same thing as above, just with the left-most boxes.
-4. If you notice the doser is behind the green box, but it did not fill in green, then the threshold percentage is too low. Turn on "Display percentage" and modify the threshold percentage until it accurately fills in the box when the doser is present, and does not fill in when the doser is elsewhere.
-5. We use the red boxes as "block" checkers... If the green box matches and the red box also fills in, we do not trigger that frame. You can use this to
-6. The way we identify the frames to save relies on identifying when the doser becomes present in a box, but we do not want the doser to be visible in the timelapse. As such, we actually use a frame that is a few frames before the doser is detected. If you are noticing the doser visible in the timelapse, increase the "Back frame offset count". The default is 10.
+4. You can reposition boxes by dragging them around.
+5. If you notice the doser is behind the green box, but it did not fill in green, then the threshold percentage is too low. Turn on "Display percentage" and modify the threshold percentage until it accurately fills in the box when the doser is present, and does not fill in when the doser is elsewhere.
+6. We use the red boxes as "block" checkers... If the green box matches and the red box also fills in, we do not trigger that frame. You can use this to
+7. The way we identify the frames to save relies on identifying when the doser becomes present in a box, but we do not want the doser to be visible in the timelapse. As such, we actually use a frame that is a few frames before the doser is detected. If you are noticing the doser visible in the timelapse, increase the "Back frame offset count". The default is 10.
