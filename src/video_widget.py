@@ -10,7 +10,7 @@ from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen
 from PyQt5.QtWidgets import QApplication, QWidget
 
-from config import (
+from src.config import (
     BACK_FRAME_OFFSET_COUNT,
     BOX_SIZE,
     CHECK_REGION_LINES,
@@ -20,7 +20,7 @@ from config import (
     SHOW_LUMINANCE_DEFAULT,
     TIMELAPSE_FRAMES_DIR,
 )
-from triggers import TriggerMatcher
+from src.triggers import TriggerMatcher
 
 
 def get_ffmpeg_executable():

@@ -20,7 +20,7 @@ More information is available at the bottom, but the general approach is to defi
 3. *Before using Fuselapse* Download the latest version of Fuselapse from the [releases](https://github.com/jackcrane/fuselapse/releases) page or clone the source.
 4. Launch Fuselapse either by running the executable or running `python3 main.py` from the source.
 5. You will be prompted to select the input video file. Select the video you recorded in step 1 and optionally cropped in step 2.
-![Screenshot](screenshot.png)
+![Screenshot](media/screenshot.png)
 6. The defaults should work fine for most videos, but you can adjust the regions of interest and threshold percentage if it is not properly matching. See below for instructions on how to do this.
 7. Verify frame identification is working by clicking on <kbd>\>\> next offset match</kbd> a few times. You should see the video progress to the next layer being done, with the doser not being present in the frame.
 8. Set your goal timelapse length, and click <kbd>Create Timelapse</kbd>. It will take a few minutes to process, and then you will have a timelapse video of your print job.

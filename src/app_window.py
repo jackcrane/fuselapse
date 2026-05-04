@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from config import (
+from src.config import (
     BACK_FRAME_OFFSET_COUNT,
     LUMINANCE_THRESHOLD_PCT,
     OUTPUT_FILE,
@@ -27,8 +27,8 @@ from config import (
     TIMELAPSE_OUTPUT_FILE,
     TIMELAPSE_PREVIEW_INTERVAL_MS,
 )
-from persistence import save_regions
-from video_widget import VideoWidget
+from src.persistence import save_regions
+from src.video_widget import VideoWidget
 
 
 class TimelapseWorker(QObject):
