@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -25,13 +25,14 @@ from config import (
     SHOW_LUMINANCE_DEFAULT,
     TIMELAPSE_LENGTH_SECONDS,
     TIMELAPSE_OUTPUT_FILE,
+    TIMELAPSE_PREVIEW_INTERVAL_MS,
 )
 from persistence import save_regions
 from video_widget import VideoWidget
 
 
 class TimelapseWorker(QObject):
-    progress = pyqtSignal(int)
+    progress = pyqtSignal(float)
     finished = pyqtSignal(int, str)
     no_matches = pyqtSignal()
     failed = pyqtSignal(str)
@@ -67,6 +68,7 @@ class App(QWidget):
         self._is_closing = False
         self.timelapse_thread = None
         self.timelapse_worker = None
+        self.pending_preview_progress_pct = None
 
         self.setWindowTitle("Fuselapse")
         self.setFocusPolicy(Qt.StrongFocus)
@@ -98,6 +100,9 @@ class App(QWidget):
         self.timelapse_length_input = self._build_timelapse_length_input()
         self.next_btn = QPushButton("Create Timelapse")
         self.next_btn.clicked.connect(self.create_timelapse)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setInterval(TIMELAPSE_PREVIEW_INTERVAL_MS)
+        self.preview_timer.timeout.connect(self._flush_preview_progress)
 
         self._build_layout()
         self.update_frame_label()
@@ -304,6 +309,9 @@ class App(QWidget):
         save_regions(OUTPUT_FILE, data)
         self._set_timelapse_running(True)
         self.next_btn.setText("Create Timelapse (0%)")
+        self.pending_preview_progress_pct = 0.0
+        self.video.set_progress_preview_enabled(True)
+        self.preview_timer.start()
 
         self.timelapse_thread = QThread(self)
         self.timelapse_worker = TimelapseWorker(
@@ -342,6 +350,9 @@ class App(QWidget):
     def _finish_timelapse_ui(self):
         self._set_timelapse_running(False)
         self._reset_timelapse_button()
+        self.preview_timer.stop()
+        self.pending_preview_progress_pct = None
+        self.video.set_progress_preview_enabled(False)
 
     def _cleanup_timelapse_worker(self):
         if self.timelapse_worker is not None:
@@ -352,7 +363,22 @@ class App(QWidget):
             self.timelapse_thread = None
 
     def _update_timelapse_progress(self, progress_pct):
-        self.next_btn.setText(f"Create Timelapse ({progress_pct}%)")
+        self.next_btn.setText(f"Create Timelapse ({progress_pct:.1f}%)")
+        self.pending_preview_progress_pct = progress_pct
+
+    def _flush_preview_progress(self):
+        if self.pending_preview_progress_pct is None:
+            return
+
+        target_frame = round(
+            (self.pending_preview_progress_pct / 100.0)
+            * max(0, self.video.total_frames - 1)
+        )
+        if self.video.show_preview_frame(target_frame):
+            self.slider.blockSignals(True)
+            self.slider.setValue(self.video.current_frame)
+            self.slider.blockSignals(False)
+            self.update_frame_label()
 
     def _on_timelapse_finished(self, frame_count, output_path):
         self._finish_timelapse_ui()

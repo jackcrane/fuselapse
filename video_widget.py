@@ -43,7 +43,7 @@ class TimelapseBuilder:
     def _emit_progress(self, callback, value):
         if callback is None:
             return
-        callback(max(0, min(100, int(value))))
+        callback(max(0.0, min(100.0, float(value))))
 
     def _compute_region_luminance_pct(self, frame, region):
         x1 = max(0, min(frame.shape[1], region["x"]))
@@ -224,6 +224,7 @@ class VideoWidget(QWidget):
         self.video_path = video_path
         self.cap = cv2.VideoCapture(video_path)
         self.analysis_cap = cv2.VideoCapture(video_path)
+        self.preview_cap = cv2.VideoCapture(video_path)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         ret, frame = self.cap.read()
@@ -254,6 +255,7 @@ class VideoWidget(QWidget):
         self.current_frame = 0
         self.dragging_idx = None
         self.show_luminance = SHOW_LUMINANCE_DEFAULT
+        self.progress_preview_enabled = False
         self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
         self.back_frame_offset_count = BACK_FRAME_OFFSET_COUNT
         self.frame_luminance_cache = {}
@@ -265,6 +267,7 @@ class VideoWidget(QWidget):
     def cleanup(self):
         self.cap.release()
         self.analysis_cap.release()
+        self.preview_cap.release()
 
     def get_region_bounds(self, region):
         x1 = max(0, min(self.video_w, region["x"]))
@@ -363,6 +366,17 @@ class VideoWidget(QWidget):
 
         return ret
 
+    def _load_preview_frame(self, frame_index):
+        clamped_frame_index = max(0, min(self.total_frames - 1, frame_index))
+        self.preview_cap.set(cv2.CAP_PROP_POS_FRAMES, clamped_frame_index)
+
+        ret, frame = self.preview_cap.read()
+        if ret:
+            self.current_frame = clamped_frame_index
+            self.frame = frame
+
+        return ret
+
     def _get_region_threshold_states_for_frame(self, frame_index):
         luminance_pcts = self._get_frame_luminance_pcts(frame_index)
         if luminance_pcts is None:
@@ -453,10 +467,22 @@ class VideoWidget(QWidget):
             total_frames=self.total_frames,
         )
 
-    def set_frame(self, frame_index):
+    def set_frame(self, frame_index, emit_matches=True):
         if self._load_frame(frame_index):
-            self._print_matching_trigger_frames()
+            if emit_matches:
+                self._print_matching_trigger_frames()
 
+        self.update()
+
+    def show_preview_frame(self, frame_index):
+        if not self._load_preview_frame(frame_index):
+            return False
+
+        self.update()
+        return True
+
+    def set_progress_preview_enabled(self, enabled):
+        self.progress_preview_enabled = enabled
         self.update()
 
     def set_show_luminance(self, enabled):
@@ -516,6 +542,9 @@ class VideoWidget(QWidget):
                 Qt.SmoothTransformation,
             ),
         )
+
+        if self.progress_preview_enabled:
+            return
 
         line_pen = QPen(QColor(0, 0, 0))
         line_pen.setWidthF(1.5)
