@@ -1,0 +1,171 @@
+name: Build standalone binaries
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: fuselapse-macos
+            artifact_path: dist/Fuselapse
+            ffmpeg_dir: ffmpeg-macos
+            ffmpeg_bin: ffmpeg-macos/ffmpeg
+            ffmpeg_url: https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip
+          - os: windows-latest
+            artifact_name: fuselapse-windows
+            artifact_path: dist/Fuselapse.exe
+            ffmpeg_dir: ffmpeg-windows
+            ffmpeg_bin: ffmpeg-windows/ffmpeg.exe
+            ffmpeg_url: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download ffmpeg for macOS
+        if: runner.os == 'macOS'
+        run: |
+          curl -L "${{ matrix.ffmpeg_url }}" -o ffmpeg.zip
+          mkdir -p "${{ matrix.ffmpeg_dir }}"
+          unzip -j ffmpeg.zip -d "${{ matrix.ffmpeg_dir }}"
+          chmod +x "${{ matrix.ffmpeg_bin }}"
+
+      - name: Download ffmpeg for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "${{ matrix.ffmpeg_url }}" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-unpacked
+          $ffmpegExe = Get-ChildItem -Path ffmpeg-unpacked -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $ffmpegExe) {
+            throw "ffmpeg.exe was not found in the downloaded archive."
+          }
+          New-Item -ItemType Directory -Force -Path "${{ matrix.ffmpeg_dir }}" | Out-Null
+          Copy-Item $ffmpegExe.FullName "${{ matrix.ffmpeg_bin }}"
+
+      - name: Build one-file executable
+        env:
+          FUSELAPSE_FFMPEG: ${{ github.workspace }}/${{ matrix.ffmpeg_bin }}
+        run: pyinstaller --clean --noconfirm fuselapse.spec
+
+      - name: Upload binary artifact
+        id: upload_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.sha }}
+          name: Fuselapse build ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release-assets/fuselapse-macos/Fuselapse
+            release-assets/fuselapse-windows/Fuselapse.exe
+
+  comment_on_pr:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comment with artifact links
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run_id = context.runId;
+            const issue_number = context.payload.pull_request.number;
+            const marker = "<!-- fuselapse-build-artifacts -->";
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner,
+                repo,
+                run_id,
+                per_page: 100,
+              },
+              (response) => response.data.artifacts
+            );
+
+            const links = artifacts
+              .filter((artifact) => !artifact.expired)
+              .map((artifact) => {
+                const url = `https://github.com/${owner}/${repo}/actions/runs/${run_id}/artifacts/${artifact.id}`;
+                return `- [${artifact.name}](${url})`;
+              })
+              .join("\n");
+
+            const body = [
+              marker,
+              "Standalone binaries are ready for this PR:",
+              "",
+              links || `- [Open workflow run](https://github.com/${owner}/${repo}/actions/runs/${run_id})`,
+              "",
+              `Run page: https://github.com/${owner}/${repo}/actions/runs/${run_id}`,
+            ].join("\n");
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number,
+                per_page: 100,
+              },
+              (response) => response.data
+            );
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });

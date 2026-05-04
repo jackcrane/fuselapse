@@ -1,3 +1,4 @@
+import os
 import sys
 import subprocess
 from pathlib import Path
@@ -19,6 +20,18 @@ from config import (
     TIMELAPSE_FRAMES_DIR,
 )
 from triggers import TriggerMatcher
+
+
+def get_ffmpeg_executable():
+    bundled_root = getattr(sys, "_MEIPASS", None)
+    executable_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+
+    if bundled_root:
+        bundled_ffmpeg = Path(bundled_root) / executable_name
+        if bundled_ffmpeg.exists():
+            return str(bundled_ffmpeg)
+
+    return executable_name
 
 
 class TimelapseBuilder:
@@ -177,7 +190,7 @@ class TimelapseBuilder:
     def _run_ffmpeg(self, frames_dir, frame_count, length_seconds, output_path):
         fps = frame_count / max(length_seconds, 0.1)
         command = [
-            "ffmpeg",
+            get_ffmpeg_executable(),
             "-y",
             "-framerate",
             f"{fps:.6f}",

@@ -2,3 +2,5 @@
 regions.json
 .pycache
 frames
+build
+dist
