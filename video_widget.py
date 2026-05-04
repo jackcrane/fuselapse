@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QApplication, QWidget
 
 from config import (
     BOX_SIZE,
+    CHECK_REGION_LINES,
     CHECK_REGIONS,
     LUMINANCE_THRESHOLD_PCT,
     MAX_SCREEN_RATIO,
@@ -87,6 +88,29 @@ class VideoWidget(QWidget):
         self.luminance_threshold_pct = threshold_pct
         self.update()
 
+    def get_region_corners(self, region):
+        x = region["x"]
+        y = region["y"]
+        return [
+            (x, y),
+            (x + BOX_SIZE, y),
+            (x, y + BOX_SIZE),
+            (x + BOX_SIZE, y + BOX_SIZE),
+        ]
+
+    def get_closest_region_corners(self, start_region, end_region):
+        start_corners = self.get_region_corners(start_region)
+        end_corners = self.get_region_corners(end_region)
+
+        return min(
+            (
+                (start_corner, end_corner)
+                for start_corner in start_corners
+                for end_corner in end_corners
+            ),
+            key=lambda pair: (pair[0][0] - pair[1][0]) ** 2 + (pair[0][1] - pair[1][1]) ** 2,
+        )
+
     def paintEvent(self, event):
         painter = QPainter(self)
 
@@ -109,6 +133,20 @@ class VideoWidget(QWidget):
                 Qt.SmoothTransformation,
             ),
         )
+
+        line_pen = QPen(QColor(0, 0, 0))
+        line_pen.setWidthF(1.5)
+        painter.setPen(line_pen)
+        for start_idx, end_idx in CHECK_REGION_LINES:
+            start_region = self.regions[start_idx]
+            end_region = self.regions[end_idx]
+            start_corner, end_corner = self.get_closest_region_corners(start_region, end_region)
+            painter.drawLine(
+                int(start_corner[0] * self.scale),
+                int(start_corner[1] * self.scale),
+                int(end_corner[0] * self.scale),
+                int(end_corner[1] * self.scale),
+            )
 
         for region in self.regions:
             color = (

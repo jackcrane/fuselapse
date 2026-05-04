@@ -8,6 +8,11 @@ CHECK_REGIONS = [
     {"x_pct": 0.7170, "y_pct": 0.8696, "label": "negative"},
 ]
 
+CHECK_REGION_LINES = [
+    (0, 2),
+    (1, 3),
+]
+
 BOX_SIZE = 40
 OUTPUT_FILE = "regions.json"
 MAX_SCREEN_RATIO = 0.82
