@@ -1,13 +1,16 @@
 import sys
+from pathlib import Path
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -20,15 +23,50 @@ from config import (
     LUMINANCE_THRESHOLD_PCT,
     OUTPUT_FILE,
     SHOW_LUMINANCE_DEFAULT,
+    TIMELAPSE_LENGTH_SECONDS,
+    TIMELAPSE_OUTPUT_FILE,
 )
 from persistence import save_regions
 from video_widget import VideoWidget
+
+
+class TimelapseWorker(QObject):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(int, str)
+    no_matches = pyqtSignal()
+    failed = pyqtSignal(str)
+
+    def __init__(self, builder, length_seconds, output_path):
+        super().__init__()
+        self.builder = builder
+        self.length_seconds = length_seconds
+        self.output_path = output_path
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            frame_count, output_path = self.builder.create_timelapse(
+                self.length_seconds,
+                self.output_path,
+                progress_callback=self.progress.emit,
+            )
+        except RuntimeError as error:
+            self.failed.emit(str(error))
+            return
+
+        if frame_count == 0:
+            self.no_matches.emit()
+            return
+
+        self.finished.emit(frame_count, str(output_path))
 
 
 class App(QWidget):
     def __init__(self):
         super().__init__()
         self._is_closing = False
+        self.timelapse_thread = None
+        self.timelapse_worker = None
 
         self.setWindowTitle("Fuselapse")
         self.setFocusPolicy(Qt.StrongFocus)
@@ -57,8 +95,9 @@ class App(QWidget):
         self.display_percentage_checkbox = self._build_luminance_checkbox()
         self.threshold_input = self._build_threshold_input()
         self.back_frame_offset_input = self._build_back_frame_offset_input()
-        self.next_btn = QPushButton("Next")
-        self.next_btn.clicked.connect(self.save_and_exit)
+        self.timelapse_length_input = self._build_timelapse_length_input()
+        self.next_btn = QPushButton("Create Timelapse")
+        self.next_btn.clicked.connect(self.create_timelapse)
 
         self._build_layout()
         self.update_frame_label()
@@ -116,6 +155,26 @@ class App(QWidget):
         spin_box.valueChanged.connect(self.video.set_back_frame_offset_count)
         return spin_box
 
+    def _build_timelapse_length_input(self):
+        spin_box = QDoubleSpinBox()
+        spin_box.setRange(0.1, 3600.0)
+        spin_box.setDecimals(1)
+        spin_box.setSingleStep(1.0)
+        spin_box.setValue(TIMELAPSE_LENGTH_SECONDS)
+        spin_box.setButtonSymbols(QSpinBox.NoButtons)
+        spin_box.setFocusPolicy(Qt.ClickFocus)
+        spin_box.setStyleSheet(
+            """
+            QDoubleSpinBox {
+                border: 1px solid #666;
+                background: #fff;
+                color: #111;
+                padding: 2px 2px;
+            }
+            """
+        )
+        return spin_box
+
     def _build_layout(self):
         slider_row = QHBoxLayout()
         slider_row.addWidget(self.slider)
@@ -153,6 +212,11 @@ class App(QWidget):
         layout.addLayout(offset_row)
         layout.addLayout(controls_row)
         layout.addWidget(divider)
+        timelapse_row = QHBoxLayout()
+        timelapse_row.addWidget(QLabel("Timelapse length (s)"))
+        timelapse_row.addWidget(self.timelapse_length_input)
+        timelapse_row.addStretch()
+        layout.addLayout(timelapse_row)
         layout.addWidget(self.next_btn)
         self.setLayout(layout)
 
@@ -220,13 +284,112 @@ class App(QWidget):
         elif key == Qt.Key_Q:
             self.close()
 
-    def save_and_exit(self):
+    def create_timelapse(self):
         data = self.video.get_regions_pct()
+        default_output_path = str(
+            Path(self.video.video_path).with_name(TIMELAPSE_OUTPUT_FILE)
+        )
+        output_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Timelapse",
+            default_output_path,
+            "MP4 Video (*.mp4);;All Files (*)",
+        )
+        if not output_path:
+            return
+
+        if "." not in output_path.rsplit("/", 1)[-1]:
+            output_path = f"{output_path}.mp4"
+
         save_regions(OUTPUT_FILE, data)
-        print("Saved:", data)
-        self.close()
+        self._set_timelapse_running(True)
+        self.next_btn.setText("Create Timelapse (0%)")
+
+        self.timelapse_thread = QThread(self)
+        self.timelapse_worker = TimelapseWorker(
+            self.video.build_timelapse_builder(),
+            self.timelapse_length_input.value(),
+            output_path,
+        )
+        self.timelapse_worker.moveToThread(self.timelapse_thread)
+        self.timelapse_thread.started.connect(self.timelapse_worker.run)
+        self.timelapse_worker.progress.connect(self._update_timelapse_progress)
+        self.timelapse_worker.finished.connect(self._on_timelapse_finished)
+        self.timelapse_worker.no_matches.connect(self._on_timelapse_no_matches)
+        self.timelapse_worker.failed.connect(self._on_timelapse_failed)
+        self.timelapse_worker.finished.connect(self.timelapse_thread.quit)
+        self.timelapse_worker.no_matches.connect(self.timelapse_thread.quit)
+        self.timelapse_worker.failed.connect(self.timelapse_thread.quit)
+        self.timelapse_thread.finished.connect(self._cleanup_timelapse_worker)
+        self.timelapse_thread.start()
+
+    def _set_timelapse_running(self, is_running):
+        self.next_btn.setEnabled(not is_running)
+        self.slider.setEnabled(not is_running)
+        self.previous_match_btn.setEnabled(not is_running)
+        self.next_match_btn.setEnabled(not is_running)
+        self.previous_offset_match_btn.setEnabled(not is_running)
+        self.next_offset_match_btn.setEnabled(not is_running)
+        self.display_percentage_checkbox.setEnabled(not is_running)
+        self.threshold_input.setEnabled(not is_running)
+        self.back_frame_offset_input.setEnabled(not is_running)
+        self.timelapse_length_input.setEnabled(not is_running)
+
+    def _reset_timelapse_button(self):
+        self.next_btn.setEnabled(True)
+        self.next_btn.setText("Create Timelapse")
+
+    def _finish_timelapse_ui(self):
+        self._set_timelapse_running(False)
+        self._reset_timelapse_button()
+
+    def _cleanup_timelapse_worker(self):
+        if self.timelapse_worker is not None:
+            self.timelapse_worker.deleteLater()
+            self.timelapse_worker = None
+        if self.timelapse_thread is not None:
+            self.timelapse_thread.deleteLater()
+            self.timelapse_thread = None
+
+    def _update_timelapse_progress(self, progress_pct):
+        self.next_btn.setText(f"Create Timelapse ({progress_pct}%)")
+
+    def _on_timelapse_finished(self, frame_count, output_path):
+        self._finish_timelapse_ui()
+        print("Saved:", self.video.get_regions_pct())
+        print(f"Created timelapse with {frame_count} frames: {output_path}")
+        QMessageBox.information(
+            self,
+            "Timelapse Created",
+            f"Created timelapse with {frame_count} frames:\n{output_path}",
+        )
+
+    def _on_timelapse_no_matches(self):
+        self._finish_timelapse_ui()
+        QMessageBox.warning(
+            self,
+            "No Offset Matches",
+            "No offset match frames were found from the current frame onward.",
+        )
+
+    def _on_timelapse_failed(self, message):
+        self._finish_timelapse_ui()
+        QMessageBox.critical(
+            self,
+            "Timelapse Creation Failed",
+            message,
+        )
 
     def closeEvent(self, event):
+        if self.timelapse_thread is not None and self.timelapse_thread.isRunning():
+            QMessageBox.information(
+                self,
+                "Timelapse In Progress",
+                "Please wait for the timelapse to finish before closing the window.",
+            )
+            event.ignore()
+            return
+
         if not self._is_closing:
             self._is_closing = True
             self.video.cleanup()
