@@ -27,6 +27,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
+    # Deliberately exclude repo sample media and runtime output files.
     excludes=[],
     noarchive=False,
     optimize=0,

@@ -17,7 +17,7 @@ jobs:
         include:
           - os: macos-latest
             artifact_name: fuselapse-macos
-            artifact_path: dist/Fuselapse
+            artifact_path: dist/Fuselapse-macos.zip
             ffmpeg_dir: ffmpeg-macos
             ffmpeg_bin: ffmpeg-macos/ffmpeg
             ffmpeg_url: https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip
@@ -68,6 +68,70 @@ jobs:
           FUSELAPSE_FFMPEG: ${{ github.workspace }}/${{ matrix.ffmpeg_bin }}
         run: pyinstaller --clean --noconfirm fuselapse.spec
 
+      - name: Assert sample files are not part of shipped artifacts
+        shell: bash
+        run: |
+          test ! -e dist/3dbenchy-crop-trim.mov
+          test ! -e dist/timelapse.mp4
+          test ! -e dist/regions.json
+
+      - name: Import Developer ID certificate
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_CERTIFICATE_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > developer-id.p12
+          security create-keychain -p runner fuselapse-build.keychain
+          security set-keychain-settings -lut 21600 fuselapse-build.keychain
+          security unlock-keychain -p runner fuselapse-build.keychain
+          security import developer-id.p12 -k fuselapse-build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s fuselapse-build.keychain login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k runner fuselapse-build.keychain
+
+      - name: Code sign macOS binary
+        if: runner.os == 'macOS' && env.MACOS_CODESIGN_IDENTITY != ''
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          codesign --force --options runtime --sign "$MACOS_CODESIGN_IDENTITY" --timestamp dist/Fuselapse
+          codesign --verify --deep --strict --verbose=2 dist/Fuselapse
+
+      - name: Package macOS binary for distribution
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/Fuselapse dist/Fuselapse-macos.zip
+
+      - name: Notarize macOS archive
+        if: runner.os == 'macOS' && env.APPLE_TEAM_ID != '' && env.APPLE_NOTARY_KEY_ID != '' && env.APPLE_NOTARY_ISSUER_ID != '' && env.APPLE_NOTARY_PRIVATE_KEY != ''
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$HOME/.private_keys"
+          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY" > "$HOME/.private_keys/AuthKey_$APPLE_NOTARY_KEY_ID.p8"
+          xcrun notarytool submit dist/Fuselapse-macos.zip \
+            --key "$HOME/.private_keys/AuthKey_$APPLE_NOTARY_KEY_ID.p8" \
+            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Validate macOS signature
+        if: runner.os == 'macOS' && env.MACOS_CODESIGN_IDENTITY != ''
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: spctl -a -t exec -vv dist/Fuselapse
+
+      - name: Clean up macOS signing material
+        if: runner.os == 'macOS' && always()
+        run: |
+          rm -f developer-id.p12
+          rm -f "$HOME/.private_keys"/AuthKey_*.p8
+          security delete-keychain fuselapse-build.keychain || true
+
       - name: Upload binary artifact
         id: upload_artifact
         uses: actions/upload-artifact@v4
@@ -93,7 +157,7 @@ jobs:
           name: Fuselapse build ${{ github.sha }}
           generate_release_notes: true
           files: |
-            release-assets/fuselapse-macos/Fuselapse
+            release-assets/fuselapse-macos/Fuselapse-macos.zip
             release-assets/fuselapse-windows/Fuselapse.exe
 
   comment_on_pr:
