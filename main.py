@@ -11,6 +11,10 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QSlider,
     QLabel,
+    QCheckBox,
+    QSpinBox,
+    QFrame,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QImage, QPainter, QColor, QPen
@@ -28,7 +32,7 @@ BOX_SIZE = 40
 OUTPUT_FILE = "regions.json"
 MAX_SCREEN_RATIO = 0.82
 LUMINANCE_THRESHOLD_PCT = 15
-DEBUG_LUMINANCE = "--debug-luminance" in sys.argv
+SHOW_LUMINANCE_DEFAULT = "--debug-luminance" in sys.argv
 
 
 class VideoWidget(QWidget):
@@ -67,6 +71,8 @@ class VideoWidget(QWidget):
 
         self.current_frame = 0
         self.dragging_idx = None
+        self.show_luminance = SHOW_LUMINANCE_DEFAULT
+        self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
 
     def get_region_bounds(self, region):
         x1 = max(0, min(self.video_w, region["x"]))
@@ -97,6 +103,14 @@ class VideoWidget(QWidget):
         if ret:
             self.frame = frame
 
+        self.update()
+
+    def set_show_luminance(self, enabled):
+        self.show_luminance = enabled
+        self.update()
+
+    def set_luminance_threshold_pct(self, threshold_pct):
+        self.luminance_threshold_pct = threshold_pct
         self.update()
 
     def paintEvent(self, event):
@@ -132,14 +146,14 @@ class VideoWidget(QWidget):
             draw_size = int(BOX_SIZE * self.scale)
             luminance_pct = self.get_region_luminance_pct(r)
 
-            if luminance_pct < LUMINANCE_THRESHOLD_PCT:
+            if luminance_pct < self.luminance_threshold_pct:
                 fill_color = QColor(color)
                 fill_color.setAlphaF(0.5)
                 painter.fillRect(draw_x, draw_y, draw_size, draw_size, fill_color)
 
             painter.drawRect(draw_x, draw_y, draw_size, draw_size)
 
-            if DEBUG_LUMINANCE:
+            if self.show_luminance:
                 text_rect = img.rect()
                 text_rect.setX(draw_x)
                 text_rect.setY(draw_y)
@@ -187,7 +201,7 @@ class App(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Video Tool")
+        self.setWindowTitle("Fuselapse")
         self.setFocusPolicy(Qt.StrongFocus)
 
         video_path, _ = QFileDialog.getOpenFileName(
@@ -206,13 +220,55 @@ class App(QWidget):
         self.slider.setMinimum(0)
         self.slider.setMaximum(self.video.total_frames - 1)
         self.slider.valueChanged.connect(self.on_slider_change)
+        self.slider.setFocus()
 
         self.frame_label = QLabel()
         self.update_frame_label()
 
+        self.keyboard_help_label = QLabel("a/d shift 1 frame; A/D shift 10 frames")
+
         slider_row = QHBoxLayout()
         slider_row.addWidget(self.slider)
         slider_row.addWidget(self.frame_label)
+
+        controls_row = QHBoxLayout()
+
+        self.display_percentage_checkbox = QCheckBox("Display percentage")
+        self.display_percentage_checkbox.setChecked(SHOW_LUMINANCE_DEFAULT)
+        self.display_percentage_checkbox.toggled.connect(
+            self.video.set_show_luminance
+        )
+
+        threshold_label = QLabel("Threshold %")
+        self.threshold_input = QSpinBox()
+        self.threshold_input.setRange(0, 100)
+        self.threshold_input.setValue(LUMINANCE_THRESHOLD_PCT)
+        self.threshold_input.setButtonSymbols(QSpinBox.NoButtons)
+        self.threshold_input.setFocusPolicy(Qt.ClickFocus)
+        self.threshold_input.setStyleSheet(
+            """
+            QSpinBox {
+                border: 1px solid #666;
+                background: #fff;
+                color: #111;
+                padding: 2px 6px;
+            }
+            """
+        )
+        self.threshold_input.valueChanged.connect(
+            self.video.set_luminance_threshold_pct
+        )
+
+        controls_row.addWidget(self.display_percentage_checkbox)
+        controls_row.addSpacing(30)
+        controls_row.addWidget(threshold_label)
+        controls_row.addWidget(self.threshold_input)
+        controls_row.addStretch()
+        controls_row.setSpacing(6)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFrameShadow(QFrame.Sunken)
 
         self.next_btn = QPushButton("Next")
         self.next_btn.clicked.connect(self.save_and_exit)
@@ -220,6 +276,9 @@ class App(QWidget):
         layout = QVBoxLayout()
         layout.addWidget(self.video)
         layout.addLayout(slider_row)
+        layout.addWidget(self.keyboard_help_label)
+        layout.addLayout(controls_row)
+        layout.addWidget(divider)
         layout.addWidget(self.next_btn)
 
         self.setLayout(layout)
