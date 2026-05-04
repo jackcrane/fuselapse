@@ -1,6 +1,7 @@
 import os
-import sys
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import cv2
@@ -164,6 +165,10 @@ class TimelapseBuilder:
         for frame_path in frames_dir.glob("timelapse_frame_*.png"):
             frame_path.unlink()
 
+    def _remove_frames_dir(self, frames_dir):
+        if frames_dir.exists():
+            shutil.rmtree(frames_dir)
+
     def _write_timelapse_frames(self, frame_numbers, frames_dir, progress_callback=None):
         export_cap = cv2.VideoCapture(self.video_path)
         if not export_cap.isOpened():
@@ -219,14 +224,17 @@ class TimelapseBuilder:
         frames_dir = output_path.parent / TIMELAPSE_FRAMES_DIR
         frames_dir.mkdir(exist_ok=True)
         self._clear_exported_frames(frames_dir)
-        self._write_timelapse_frames(
-            frame_numbers,
-            frames_dir,
-            progress_callback=progress_callback,
-        )
-        self._emit_progress(progress_callback, 95)
-        self._run_ffmpeg(frames_dir, len(frame_numbers), length_seconds, output_path)
-        self._emit_progress(progress_callback, 100)
+        try:
+            self._write_timelapse_frames(
+                frame_numbers,
+                frames_dir,
+                progress_callback=progress_callback,
+            )
+            self._emit_progress(progress_callback, 95)
+            self._run_ffmpeg(frames_dir, len(frame_numbers), length_seconds, output_path)
+            self._emit_progress(progress_callback, 100)
+        finally:
+            self._remove_frames_dir(frames_dir)
         return len(frame_numbers), output_path
 
 
@@ -361,11 +369,7 @@ class VideoWidget(QWidget):
         ]
 
     def _print_matching_trigger_frames(self):
-        current_states = self._get_region_threshold_states()
-        for frame_number in self.trigger_matcher.get_matching_frames(
-            self.current_frame, current_states
-        ):
-            print(frame_number)
+        return
 
     def _load_frame(self, frame_index):
         clamped_frame_index = max(0, min(self.total_frames - 1, frame_index))

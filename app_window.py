@@ -382,8 +382,6 @@ class App(QWidget):
 
     def _on_timelapse_finished(self, frame_count, output_path):
         self._finish_timelapse_ui()
-        print("Saved:", self.video.get_regions_pct())
-        print(f"Created timelapse with {frame_count} frames: {output_path}")
         QMessageBox.information(
             self,
             "Timelapse Created",
