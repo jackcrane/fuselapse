@@ -32,7 +32,7 @@ from src.video_widget import VideoWidget
 
 
 class TimelapseWorker(QObject):
-    progress = pyqtSignal(float)
+    progress = pyqtSignal(float, int)
     finished = pyqtSignal(int, str)
     no_matches = pyqtSignal()
     failed = pyqtSignal(str)
@@ -69,6 +69,7 @@ class App(QWidget):
         self.timelapse_thread = None
         self.timelapse_worker = None
         self.pending_preview_progress_pct = None
+        self.pending_preview_frame_index = None
 
         self.setWindowTitle("Fuselapse")
         self.setFocusPolicy(Qt.StrongFocus)
@@ -310,6 +311,7 @@ class App(QWidget):
         self._set_timelapse_running(True)
         self.next_btn.setText("Create Timelapse (0%)")
         self.pending_preview_progress_pct = 0.0
+        self.pending_preview_frame_index = self.video.current_frame
         self.video.set_progress_preview_enabled(True)
         self.preview_timer.start()
 
@@ -352,6 +354,7 @@ class App(QWidget):
         self._reset_timelapse_button()
         self.preview_timer.stop()
         self.pending_preview_progress_pct = None
+        self.pending_preview_frame_index = None
         self.video.set_progress_preview_enabled(False)
 
     def _cleanup_timelapse_worker(self):
@@ -362,19 +365,17 @@ class App(QWidget):
             self.timelapse_thread.deleteLater()
             self.timelapse_thread = None
 
-    def _update_timelapse_progress(self, progress_pct):
+    def _update_timelapse_progress(self, progress_pct, preview_frame_index):
         self.next_btn.setText(f"Create Timelapse ({progress_pct:.1f}%)")
         self.pending_preview_progress_pct = progress_pct
+        if preview_frame_index >= 0:
+            self.pending_preview_frame_index = preview_frame_index
 
     def _flush_preview_progress(self):
-        if self.pending_preview_progress_pct is None:
+        if self.pending_preview_frame_index is None:
             return
 
-        target_frame = round(
-            (self.pending_preview_progress_pct / 100.0)
-            * max(0, self.video.total_frames - 1)
-        )
-        if self.video.show_preview_frame(target_frame):
+        if self.video.show_preview_frame(self.pending_preview_frame_index):
             self.slider.blockSignals(True)
             self.slider.setValue(self.video.current_frame)
             self.slider.blockSignals(False)

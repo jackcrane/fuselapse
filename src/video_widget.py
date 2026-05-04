@@ -54,10 +54,13 @@ class TimelapseBuilder:
         self.frame_luminance_cache = {}
         self.trigger_matcher = TriggerMatcher(CHECK_REGION_LINES, [])
 
-    def _emit_progress(self, callback, value):
+    def _emit_progress(self, callback, value, preview_frame=None):
         if callback is None:
             return
-        callback(max(0.0, min(100.0, float(value))))
+        callback(
+            max(0.0, min(100.0, float(value))),
+            -1 if preview_frame is None else int(preview_frame),
+        )
 
     def _compute_region_luminance_pct(self, frame, region):
         x1 = max(0, min(frame.shape[1], region["x"]))
@@ -135,7 +138,11 @@ class TimelapseBuilder:
         try:
             current_frame = max(0, min(self.total_frames - 1, self.start_frame))
             matched_frames = []
-            self._emit_progress(progress_callback, 5)
+            self._emit_progress(
+                progress_callback,
+                5,
+                preview_frame=current_frame,
+            )
 
             while True:
                 search_start = min(
@@ -155,6 +162,11 @@ class TimelapseBuilder:
                     break
 
                 matched_frames.append(offset_match_frame)
+                self._emit_progress(
+                    progress_callback,
+                    5 + (65 * frame_index / max(1, self.total_frames - 1)),
+                    preview_frame=offset_match_frame,
+                )
                 current_frame = offset_match_frame
 
             return matched_frames
@@ -188,6 +200,7 @@ class TimelapseBuilder:
                 self._emit_progress(
                     progress_callback,
                     70 + (25 * export_index / max(1, len(frame_numbers))),
+                    preview_frame=frame_number,
                 )
         finally:
             export_cap.release()
@@ -230,9 +243,17 @@ class TimelapseBuilder:
                 frames_dir,
                 progress_callback=progress_callback,
             )
-            self._emit_progress(progress_callback, 95)
+            self._emit_progress(
+                progress_callback,
+                95,
+                preview_frame=frame_numbers[-1],
+            )
             self._run_ffmpeg(frames_dir, len(frame_numbers), length_seconds, output_path)
-            self._emit_progress(progress_callback, 100)
+            self._emit_progress(
+                progress_callback,
+                100,
+                preview_frame=frame_numbers[-1],
+            )
         finally:
             self._remove_frames_dir(frames_dir)
         return len(frame_numbers), output_path
