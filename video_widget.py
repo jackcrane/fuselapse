@@ -63,6 +63,10 @@ class VideoWidget(QWidget):
             self._get_region_threshold_states(),
         )
 
+    def cleanup(self):
+        self.cap.release()
+        self.analysis_cap.release()
+
     def get_region_bounds(self, region):
         x1 = max(0, min(self.video_w, region["x"]))
         y1 = max(0, min(self.video_h, region["y"]))

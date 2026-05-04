@@ -28,6 +28,7 @@ from video_widget import VideoWidget
 class App(QWidget):
     def __init__(self):
         super().__init__()
+        self._is_closing = False
 
         self.setWindowTitle("Fuselapse")
         self.setFocusPolicy(Qt.StrongFocus)
@@ -217,10 +218,16 @@ class App(QWidget):
         elif key == Qt.Key_D:
             self.step_frames(10 if modifiers & Qt.ShiftModifier else 1)
         elif key == Qt.Key_Q:
-            QApplication.quit()
+            self.close()
 
     def save_and_exit(self):
         data = self.video.get_regions_pct()
         save_regions(OUTPUT_FILE, data)
         print("Saved:", data)
-        QApplication.quit()
+        self.close()
+
+    def closeEvent(self, event):
+        if not self._is_closing:
+            self._is_closing = True
+            self.video.cleanup()
+        super().closeEvent(event)
