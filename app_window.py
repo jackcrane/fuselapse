@@ -40,9 +40,9 @@ class App(QWidget):
         self.slider = self._build_slider()
         self.frame_label = QLabel()
         self.keyboard_help_label = QLabel("a/d shift 1 frame; A/D shift 10 frames")
-        self.previous_match_btn = self._build_match_button("<< previous match")
+        self.previous_match_btn = QPushButton("<< previous match")
         self.previous_match_btn.clicked.connect(self.go_to_previous_match)
-        self.next_match_btn = self._build_match_button(">> next match")
+        self.next_match_btn = QPushButton(">> next match")
         self.next_match_btn.clicked.connect(self.go_to_next_match)
         self.display_percentage_checkbox = self._build_luminance_checkbox()
         self.threshold_input = self._build_threshold_input()
@@ -67,17 +67,6 @@ class App(QWidget):
         checkbox.toggled.connect(self.video.set_show_luminance)
         return checkbox
 
-    def _build_match_button(self, label):
-        button = QPushButton(label)
-        button.setStyleSheet(
-            """
-            QPushButton {
-                padding: 2px 8px;
-            }
-            """
-        )
-        return button
-
     def _build_threshold_input(self):
         spin_box = QSpinBox()
         spin_box.setRange(0, 100)
@@ -90,7 +79,7 @@ class App(QWidget):
                 border: 1px solid #666;
                 background: #fff;
                 color: #111;
-                padding: 2px 6px;
+                padding: 2px 2px;
             }
             """
         )
