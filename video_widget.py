@@ -21,7 +21,9 @@ class VideoWidget(QWidget):
     def __init__(self, video_path):
         super().__init__()
 
+        self.video_path = video_path
         self.cap = cv2.VideoCapture(video_path)
+        self.analysis_cap = cv2.VideoCapture(video_path)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         ret, frame = self.cap.read()
@@ -53,6 +55,7 @@ class VideoWidget(QWidget):
         self.dragging_idx = None
         self.show_luminance = SHOW_LUMINANCE_DEFAULT
         self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
+        self.frame_luminance_cache = {}
         self.trigger_matcher = TriggerMatcher(
             CHECK_REGION_LINES,
             self._get_region_threshold_states(),
@@ -65,22 +68,75 @@ class VideoWidget(QWidget):
         y2 = max(0, min(self.video_h, region["y"] + BOX_SIZE))
         return x1, y1, x2, y2
 
-    def get_region_luminance_pct(self, region):
+    def _compute_region_luminance_pct(self, frame, region):
         x1, y1, x2, y2 = self.get_region_bounds(region)
         if x2 <= x1 or y2 <= y1:
             return 0
 
-        roi = self.frame[y1:y2, x1:x2]
+        roi = frame[y1:y2, x1:x2]
         avg_bgr = roi.mean(axis=(0, 1))
-        avg_rgb = QColor(int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0]))
-        return round(avg_rgb.lightnessF() * 100)
+        max_channel = max(avg_bgr[0], avg_bgr[1], avg_bgr[2])
+        min_channel = min(avg_bgr[0], avg_bgr[1], avg_bgr[2])
+        return round(((max_channel + min_channel) / (2 * 255)) * 100)
+
+    def _compute_frame_luminance_pcts(self, frame):
+        return [
+            self._compute_region_luminance_pct(frame, region)
+            for region in self.regions
+        ]
+
+    def _cache_current_frame_luminance_pcts(self):
+        luminance_pcts = self._compute_frame_luminance_pcts(self.frame)
+        self.frame_luminance_cache[self.current_frame] = luminance_pcts
+        return luminance_pcts
+
+    def _get_frame_luminance_pcts(self, frame_index):
+        if frame_index in self.frame_luminance_cache:
+            return self.frame_luminance_cache[frame_index]
+
+        clamped_frame_index = max(0, min(self.total_frames - 1, frame_index))
+        self.analysis_cap.set(cv2.CAP_PROP_POS_FRAMES, clamped_frame_index)
+        ret, frame = self.analysis_cap.read()
+        if not ret:
+            return None
+
+        luminance_pcts = self._compute_frame_luminance_pcts(frame)
+        self.frame_luminance_cache[clamped_frame_index] = luminance_pcts
+        return luminance_pcts
+
+    def _get_current_frame_luminance_pcts(self):
+        return self.frame_luminance_cache.get(self.current_frame) or self._cache_current_frame_luminance_pcts()
+
+    def _populate_frame_luminance_cache_range(self, start_frame, end_frame):
+        start_frame = max(0, start_frame)
+        end_frame = min(self.total_frames - 1, end_frame)
+        if start_frame > end_frame:
+            return
+
+        missing_frames = [
+            frame_index
+            for frame_index in range(start_frame, end_frame + 1)
+            if frame_index not in self.frame_luminance_cache
+        ]
+        if not missing_frames:
+            return
+
+        self.analysis_cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        for frame_index in range(start_frame, end_frame + 1):
+            ret, frame = self.analysis_cap.read()
+            if not ret:
+                break
+
+            if frame_index not in self.frame_luminance_cache:
+                self.frame_luminance_cache[frame_index] = self._compute_frame_luminance_pcts(frame)
 
     def is_region_above_threshold(self, region):
-        return self.get_region_luminance_pct(region) >= self.luminance_threshold_pct
+        return self._compute_region_luminance_pct(self.frame, region) >= self.luminance_threshold_pct
 
     def _get_region_threshold_states(self):
         return [
-            self.is_region_above_threshold(region) for region in self.regions
+            luminance_pct >= self.luminance_threshold_pct
+            for luminance_pct in self._get_current_frame_luminance_pcts()
         ]
 
     def _print_matching_trigger_frames(self):
@@ -98,22 +154,9 @@ class VideoWidget(QWidget):
         if ret:
             self.current_frame = clamped_frame_index
             self.frame = frame
+            self._cache_current_frame_luminance_pcts()
 
         return ret
-
-    def _get_region_threshold_states_for_frame(self, frame_index):
-        original_frame_index = self.current_frame
-        original_frame = self.frame.copy()
-
-        if not self._load_frame(frame_index):
-            self.current_frame = original_frame_index
-            self.frame = original_frame
-            return None
-
-        current_states = self._get_region_threshold_states()
-        self.current_frame = original_frame_index
-        self.frame = original_frame
-        return current_states
 
     def find_matching_frame(self, direction):
         if direction not in (-1, 1):
@@ -122,15 +165,23 @@ class VideoWidget(QWidget):
         if direction == 1:
             if self.current_frame >= self.total_frames - 1:
                 return None
-            search_range = range(self.current_frame + 1, self.total_frames)
             previous_states = self._get_region_threshold_states()
             if previous_states is None:
                 return None
 
-            for frame_index in search_range:
-                current_states = self._get_region_threshold_states_for_frame(frame_index)
-                if current_states is None:
+            self.analysis_cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame + 1)
+            for frame_index in range(self.current_frame + 1, self.total_frames):
+                ret, frame = self.analysis_cap.read()
+                if not ret:
                     break
+                luminance_pcts = self.frame_luminance_cache.get(frame_index)
+                if luminance_pcts is None:
+                    luminance_pcts = self._compute_frame_luminance_pcts(frame)
+                    self.frame_luminance_cache[frame_index] = luminance_pcts
+                current_states = [
+                    luminance_pct >= self.luminance_threshold_pct
+                    for luminance_pct in luminance_pcts
+                ]
 
                 if self.trigger_matcher.get_matches(
                     previous_states,
@@ -146,12 +197,22 @@ class VideoWidget(QWidget):
         if self.current_frame <= 1:
             return None
 
+        self._populate_frame_luminance_cache_range(0, self.current_frame)
         for frame_index in range(self.current_frame - 1, 0, -1):
-            previous_states = self._get_region_threshold_states_for_frame(frame_index - 1)
-            current_states = self._get_region_threshold_states_for_frame(frame_index)
+            previous_luminance_pcts = self._get_frame_luminance_pcts(frame_index - 1)
+            current_luminance_pcts = self._get_frame_luminance_pcts(frame_index)
 
-            if previous_states is None or current_states is None:
+            if previous_luminance_pcts is None or current_luminance_pcts is None:
                 break
+
+            previous_states = [
+                luminance_pct >= self.luminance_threshold_pct
+                for luminance_pct in previous_luminance_pcts
+            ]
+            current_states = [
+                luminance_pct >= self.luminance_threshold_pct
+                for luminance_pct in current_luminance_pcts
+            ]
 
             if self.trigger_matcher.get_matches(
                 previous_states,
@@ -237,7 +298,8 @@ class VideoWidget(QWidget):
                 int(end_corner[1] * self.scale),
             )
 
-        for region in self.regions:
+        current_luminance_pcts = self._get_current_frame_luminance_pcts()
+        for index, region in enumerate(self.regions):
             color = (
                 QColor(0, 255, 0)
                 if region["label"] == "positive"
@@ -248,7 +310,7 @@ class VideoWidget(QWidget):
             draw_x = int(region["x"] * self.scale)
             draw_y = int(region["y"] * self.scale)
             draw_size = int(BOX_SIZE * self.scale)
-            luminance_pct = self.get_region_luminance_pct(region)
+            luminance_pct = current_luminance_pcts[index]
 
             if luminance_pct < self.luminance_threshold_pct:
                 fill_color = QColor(color)
@@ -285,6 +347,7 @@ class VideoWidget(QWidget):
         y = int(event.y() / self.scale)
         self.regions[self.dragging_idx]["x"] = x - BOX_SIZE // 2
         self.regions[self.dragging_idx]["y"] = y - BOX_SIZE // 2
+        self.frame_luminance_cache.clear()
         self.update()
 
     def mouseReleaseEvent(self, event):
