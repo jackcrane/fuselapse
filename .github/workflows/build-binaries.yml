@@ -140,7 +140,7 @@ jobs:
           path: ${{ matrix.artifact_path }}
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
     needs: build
     runs-on: ubuntu-latest
 
