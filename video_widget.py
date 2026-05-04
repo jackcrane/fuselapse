@@ -52,6 +52,10 @@ class VideoWidget(QWidget):
         self.dragging_idx = None
         self.show_luminance = SHOW_LUMINANCE_DEFAULT
         self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
+        self.trigger_pairs = {
+            start_idx: end_idx for start_idx, end_idx in CHECK_REGION_LINES
+        }
+        self.region_is_above_threshold = self._get_region_threshold_states()
 
     def get_region_bounds(self, region):
         x1 = max(0, min(self.video_w, region["x"]))
@@ -70,6 +74,27 @@ class VideoWidget(QWidget):
         avg_rgb = QColor(int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0]))
         return round(avg_rgb.lightnessF() * 100)
 
+    def is_region_above_threshold(self, region):
+        return self.get_region_luminance_pct(region) >= self.luminance_threshold_pct
+
+    def _get_region_threshold_states(self):
+        return [
+            self.is_region_above_threshold(region) for region in self.regions
+        ]
+
+    def _print_matching_trigger_frames(self):
+        current_states = self._get_region_threshold_states()
+
+        for positive_idx, negative_idx in self.trigger_pairs.items():
+            if (
+                self.region_is_above_threshold[positive_idx]
+                and not current_states[positive_idx]
+                and current_states[negative_idx]
+            ):
+                print(self.current_frame)
+
+        self.region_is_above_threshold = current_states
+
     def set_frame(self, frame_index):
         self.current_frame = max(0, min(self.total_frames - 1, frame_index))
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
@@ -77,6 +102,7 @@ class VideoWidget(QWidget):
         ret, frame = self.cap.read()
         if ret:
             self.frame = frame
+            self._print_matching_trigger_frames()
 
         self.update()
 
@@ -86,6 +112,7 @@ class VideoWidget(QWidget):
 
     def set_luminance_threshold_pct(self, threshold_pct):
         self.luminance_threshold_pct = threshold_pct
+        self.region_is_above_threshold = self._get_region_threshold_states()
         self.update()
 
     def get_region_corners(self, region):
@@ -200,6 +227,7 @@ class VideoWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.dragging_idx = None
+        self.region_is_above_threshold = self._get_region_threshold_states()
 
     def get_regions_pct(self):
         return [
