@@ -7,6 +7,7 @@ from PyQt5.QtGui import QColor, QImage, QPainter, QPen
 from PyQt5.QtWidgets import QApplication, QWidget
 
 from config import (
+    BACK_FRAME_OFFSET_COUNT,
     BOX_SIZE,
     CHECK_REGION_LINES,
     CHECK_REGIONS,
@@ -55,6 +56,7 @@ class VideoWidget(QWidget):
         self.dragging_idx = None
         self.show_luminance = SHOW_LUMINANCE_DEFAULT
         self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
+        self.back_frame_offset_count = BACK_FRAME_OFFSET_COUNT
         self.frame_luminance_cache = {}
         self.trigger_matcher = TriggerMatcher(
             CHECK_REGION_LINES,
@@ -158,19 +160,34 @@ class VideoWidget(QWidget):
 
         return ret
 
-    def find_matching_frame(self, direction):
+    def _get_region_threshold_states_for_frame(self, frame_index):
+        luminance_pcts = self._get_frame_luminance_pcts(frame_index)
+        if luminance_pcts is None:
+            return None
+
+        return [
+            luminance_pct >= self.luminance_threshold_pct
+            for luminance_pct in luminance_pcts
+        ]
+
+    def find_matching_frame(self, direction, start_frame=None):
         if direction not in (-1, 1):
             return None
 
+        if start_frame is None:
+            start_frame = self.current_frame
+
+        start_frame = max(0, min(self.total_frames - 1, start_frame))
+
         if direction == 1:
-            if self.current_frame >= self.total_frames - 1:
+            if start_frame >= self.total_frames - 1:
                 return None
-            previous_states = self._get_region_threshold_states()
+            previous_states = self._get_region_threshold_states_for_frame(start_frame)
             if previous_states is None:
                 return None
 
-            self.analysis_cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame + 1)
-            for frame_index in range(self.current_frame + 1, self.total_frames):
+            self.analysis_cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + 1)
+            for frame_index in range(start_frame + 1, self.total_frames):
                 ret, frame = self.analysis_cap.read()
                 if not ret:
                     break
@@ -194,11 +211,11 @@ class VideoWidget(QWidget):
 
             return None
 
-        if self.current_frame <= 1:
+        if start_frame <= 1:
             return None
 
-        self._populate_frame_luminance_cache_range(0, self.current_frame)
-        for frame_index in range(self.current_frame - 1, 0, -1):
+        self._populate_frame_luminance_cache_range(0, start_frame)
+        for frame_index in range(start_frame - 1, 0, -1):
             previous_luminance_pcts = self._get_frame_luminance_pcts(frame_index - 1)
             current_luminance_pcts = self._get_frame_luminance_pcts(frame_index)
 
@@ -237,6 +254,9 @@ class VideoWidget(QWidget):
         self.luminance_threshold_pct = threshold_pct
         self.trigger_matcher.sync_states(self._get_region_threshold_states())
         self.update()
+
+    def set_back_frame_offset_count(self, offset_count):
+        self.back_frame_offset_count = offset_count
 
     def get_region_corners(self, region):
         x = region["x"]

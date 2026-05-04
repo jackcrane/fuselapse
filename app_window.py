@@ -15,7 +15,12 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from config import LUMINANCE_THRESHOLD_PCT, OUTPUT_FILE, SHOW_LUMINANCE_DEFAULT
+from config import (
+    BACK_FRAME_OFFSET_COUNT,
+    LUMINANCE_THRESHOLD_PCT,
+    OUTPUT_FILE,
+    SHOW_LUMINANCE_DEFAULT,
+)
 from persistence import save_regions
 from video_widget import VideoWidget
 
@@ -44,8 +49,13 @@ class App(QWidget):
         self.previous_match_btn.clicked.connect(self.go_to_previous_match)
         self.next_match_btn = QPushButton(">> next match")
         self.next_match_btn.clicked.connect(self.go_to_next_match)
+        self.previous_offset_match_btn = QPushButton("<< previous offset match")
+        self.previous_offset_match_btn.clicked.connect(self.go_to_previous_offset_match)
+        self.next_offset_match_btn = QPushButton(">> next offset match")
+        self.next_offset_match_btn.clicked.connect(self.go_to_next_offset_match)
         self.display_percentage_checkbox = self._build_luminance_checkbox()
         self.threshold_input = self._build_threshold_input()
+        self.back_frame_offset_input = self._build_back_frame_offset_input()
         self.next_btn = QPushButton("Next")
         self.next_btn.clicked.connect(self.save_and_exit)
 
@@ -86,6 +96,25 @@ class App(QWidget):
         spin_box.valueChanged.connect(self.video.set_luminance_threshold_pct)
         return spin_box
 
+    def _build_back_frame_offset_input(self):
+        spin_box = QSpinBox()
+        spin_box.setRange(0, max(0, self.video.total_frames - 1))
+        spin_box.setValue(BACK_FRAME_OFFSET_COUNT)
+        spin_box.setButtonSymbols(QSpinBox.NoButtons)
+        spin_box.setFocusPolicy(Qt.ClickFocus)
+        spin_box.setStyleSheet(
+            """
+            QSpinBox {
+                border: 1px solid #666;
+                background: #fff;
+                color: #111;
+                padding: 2px 2px;
+            }
+            """
+        )
+        spin_box.valueChanged.connect(self.video.set_back_frame_offset_count)
+        return spin_box
+
     def _build_layout(self):
         slider_row = QHBoxLayout()
         slider_row.addWidget(self.slider)
@@ -96,6 +125,13 @@ class App(QWidget):
         help_row.addStretch()
         help_row.addWidget(self.previous_match_btn)
         help_row.addWidget(self.next_match_btn)
+
+        offset_row = QHBoxLayout()
+        offset_row.addWidget(QLabel("Back frame offset count"))
+        offset_row.addWidget(self.back_frame_offset_input)
+        offset_row.addStretch()
+        offset_row.addWidget(self.previous_offset_match_btn)
+        offset_row.addWidget(self.next_offset_match_btn)
 
         controls_row = QHBoxLayout()
         controls_row.addWidget(self.display_percentage_checkbox)
@@ -113,6 +149,7 @@ class App(QWidget):
         layout.addWidget(self.video)
         layout.addLayout(slider_row)
         layout.addLayout(help_row)
+        layout.addLayout(offset_row)
         layout.addLayout(controls_row)
         layout.addWidget(divider)
         layout.addWidget(self.next_btn)
@@ -148,6 +185,23 @@ class App(QWidget):
         frame_index = self.video.find_matching_frame(-1)
         if frame_index is not None:
             self.jump_to_frame(frame_index)
+
+    def go_to_offset_match(self, direction):
+        start_frame = min(
+            self.video.current_frame + self.video.back_frame_offset_count,
+            self.video.total_frames - 1,
+        )
+        frame_index = self.video.find_matching_frame(direction, start_frame=start_frame)
+        if frame_index is None:
+            return
+
+        self.jump_to_frame(frame_index - self.video.back_frame_offset_count)
+
+    def go_to_next_offset_match(self):
+        self.go_to_offset_match(1)
+
+    def go_to_previous_offset_match(self):
+        self.go_to_offset_match(-1)
 
     def update_frame_label(self):
         self.frame_label.setText(
