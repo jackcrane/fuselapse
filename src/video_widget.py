@@ -138,11 +138,7 @@ class TimelapseBuilder:
         try:
             current_frame = max(0, min(self.total_frames - 1, self.start_frame))
             matched_frames = []
-            self._emit_progress(
-                progress_callback,
-                5,
-                preview_frame=current_frame,
-            )
+            self._emit_progress(progress_callback, 5)
 
             while True:
                 search_start = min(
@@ -162,11 +158,6 @@ class TimelapseBuilder:
                     break
 
                 matched_frames.append(offset_match_frame)
-                self._emit_progress(
-                    progress_callback,
-                    5 + (65 * frame_index / max(1, self.total_frames - 1)),
-                    preview_frame=offset_match_frame,
-                )
                 current_frame = offset_match_frame
 
             return matched_frames
