@@ -90,13 +90,80 @@ class VideoWidget(QWidget):
         ):
             print(frame_number)
 
-    def set_frame(self, frame_index):
-        self.current_frame = max(0, min(self.total_frames - 1, frame_index))
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+    def _load_frame(self, frame_index):
+        clamped_frame_index = max(0, min(self.total_frames - 1, frame_index))
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, clamped_frame_index)
 
         ret, frame = self.cap.read()
         if ret:
+            self.current_frame = clamped_frame_index
             self.frame = frame
+
+        return ret
+
+    def _get_region_threshold_states_for_frame(self, frame_index):
+        original_frame_index = self.current_frame
+        original_frame = self.frame.copy()
+
+        if not self._load_frame(frame_index):
+            self.current_frame = original_frame_index
+            self.frame = original_frame
+            return None
+
+        current_states = self._get_region_threshold_states()
+        self.current_frame = original_frame_index
+        self.frame = original_frame
+        return current_states
+
+    def find_matching_frame(self, direction):
+        if direction not in (-1, 1):
+            return None
+
+        if direction == 1:
+            if self.current_frame >= self.total_frames - 1:
+                return None
+            search_range = range(self.current_frame + 1, self.total_frames)
+            previous_states = self._get_region_threshold_states()
+            if previous_states is None:
+                return None
+
+            for frame_index in search_range:
+                current_states = self._get_region_threshold_states_for_frame(frame_index)
+                if current_states is None:
+                    break
+
+                if self.trigger_matcher.get_matches(
+                    previous_states,
+                    current_states,
+                    frame_index,
+                ):
+                    return frame_index
+
+                previous_states = current_states
+
+            return None
+
+        if self.current_frame <= 1:
+            return None
+
+        for frame_index in range(self.current_frame - 1, 0, -1):
+            previous_states = self._get_region_threshold_states_for_frame(frame_index - 1)
+            current_states = self._get_region_threshold_states_for_frame(frame_index)
+
+            if previous_states is None or current_states is None:
+                break
+
+            if self.trigger_matcher.get_matches(
+                previous_states,
+                current_states,
+                frame_index,
+            ):
+                return frame_index
+
+        return None
+
+    def set_frame(self, frame_index):
+        if self._load_frame(frame_index):
             self._print_matching_trigger_frames()
 
         self.update()
