@@ -36,3 +36,12 @@ The procedure for adjusting settings is as follows:
 5. If you notice the doser is behind the green box, but it did not fill in green, then the threshold percentage is too low. Turn on "Display percentage" and modify the threshold percentage until it accurately fills in the box when the doser is present, and does not fill in when the doser is elsewhere.
 6. We use the red boxes as "block" checkers... If the green box matches and the red box also fills in, we do not trigger that frame. You can use this to
 7. The way we identify the frames to save relies on identifying when the doser becomes present in a box, but we do not want the doser to be visible in the timelapse. As such, we actually use a frame that is a few frames before the doser is detected. If you are noticing the doser visible in the timelapse, increase the "Back frame offset count". The default is 10.
+
+## Building from Source
+
+```sh
+git clone https://github.com/jackcrane/fuselapse
+cd fuselapse
+pip3 install -r requirements.txt
+python3 main.py
+```
