@@ -117,18 +117,27 @@ jobs:
             --key-id "$APPLE_NOTARY_KEY_ID" \
             --issuer "$APPLE_NOTARY_ISSUER_ID" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --output-format json | tee notary-result.json
 
-      - name: Validate macOS signature
+      - name: Validate macOS code signature
         if: runner.os == 'macOS' && env.MACOS_CODESIGN_IDENTITY != ''
         env:
           MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
-        run: spctl -a -t exec -vv dist/Fuselapse
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Fuselapse
+          codesign -dv --verbose=4 dist/Fuselapse
+
+      - name: Validate notarization result
+        if: runner.os == 'macOS' && env.APPLE_TEAM_ID != '' && env.APPLE_NOTARY_KEY_ID != '' && env.APPLE_NOTARY_ISSUER_ID != '' && env.APPLE_NOTARY_PRIVATE_KEY != ''
+        run: |
+          python3 -c "import json, pathlib, sys; data=json.loads(pathlib.Path('notary-result.json').read_text()); status=data.get('status'); print(f'Notarization status: {status}'); sys.exit(0 if status == 'Accepted' else 1)"
 
       - name: Clean up macOS signing material
         if: runner.os == 'macOS' && always()
         run: |
           rm -f developer-id.p12
+          rm -f notary-result.json
           rm -f "$HOME/.private_keys"/AuthKey_*.p8
           security delete-keychain fuselapse-build.keychain || true
 
