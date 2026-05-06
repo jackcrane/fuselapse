@@ -63,20 +63,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path "${{ matrix.ffmpeg_dir }}" | Out-Null
           Copy-Item $ffmpegExe.FullName "${{ matrix.ffmpeg_bin }}"
 
-      - name: Build one-file executable
-        env:
-          FUSELAPSE_FFMPEG: ${{ github.workspace }}/${{ matrix.ffmpeg_bin }}
-        run: pyinstaller --clean --noconfirm fuselapse.spec
-
-      - name: Assert sample files are not part of shipped artifacts
-        shell: bash
-        run: |
-          test ! -e dist/3dbenchy-crop-trim.mov
-          test ! -e dist/timelapse.mp4
-          test ! -e dist/regions.json
-
       - name: Import Developer ID certificate
-        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.MACOS_CERTIFICATE_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
+        if: runner.os == 'macOS' && secrets.MACOS_CERTIFICATE_P12_BASE64 != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.MACOS_CODESIGN_IDENTITY != ''
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -90,20 +78,43 @@ jobs:
           security list-keychains -d user -s fuselapse-build.keychain login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k runner fuselapse-build.keychain
 
-      - name: Code sign macOS binary
-        if: runner.os == 'macOS' && env.MACOS_CODESIGN_IDENTITY != ''
+      - name: Write entitlements file
+        if: runner.os == 'macOS' && secrets.MACOS_ENTITLEMENTS_PLIST_BASE64 != ''
         env:
-          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          MACOS_ENTITLEMENTS_PLIST_BASE64: ${{ secrets.MACOS_ENTITLEMENTS_PLIST_BASE64 }}
         run: |
-          codesign --force --options runtime --sign "$MACOS_CODESIGN_IDENTITY" --timestamp dist/Fuselapse
-          codesign --verify --deep --strict --verbose=2 dist/Fuselapse
+          echo "$MACOS_ENTITLEMENTS_PLIST_BASE64" | base64 -D > macos-entitlements.plist
+
+      - name: Build one-file executable
+        env:
+          FUSELAPSE_FFMPEG: ${{ github.workspace }}/${{ matrix.ffmpeg_bin }}
+          MACOS_CODESIGN_IDENTITY: ${{ runner.os == 'macOS' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
+          MACOS_ENTITLEMENTS_FILE: ${{ runner.os == 'macOS' && secrets.MACOS_ENTITLEMENTS_PLIST_BASE64 != '' && format('{0}/macos-entitlements.plist', github.workspace) || '' }}
+        run: pyinstaller --clean --noconfirm fuselapse.spec
+
+      - name: Assert sample files are not part of shipped artifacts
+        shell: bash
+        run: |
+          test ! -e dist/3dbenchy-crop-trim.mov
+          test ! -e dist/timelapse.mp4
+          test ! -e dist/regions.json
+
+      - name: Show macOS signature identity
+        if: runner.os == 'macOS'
+        run: codesign -dv --verbose=4 dist/Fuselapse 2>&1 | grep '^Authority=' || true
+
+      - name: Fail if macOS build is not signed with Developer ID
+        if: runner.os == 'macOS' && secrets.MACOS_CODESIGN_IDENTITY != ''
+        run: |
+          codesign -dv --verbose=4 dist/Fuselapse 2>&1 | tee codesign-details.txt
+          grep -q '^Authority=Developer ID Application:' codesign-details.txt
 
       - name: Package macOS binary for distribution
         if: runner.os == 'macOS'
         run: ditto -c -k --keepParent dist/Fuselapse dist/Fuselapse-macos.zip
 
       - name: Notarize macOS archive
-        if: runner.os == 'macOS' && env.APPLE_TEAM_ID != '' && env.APPLE_NOTARY_KEY_ID != '' && env.APPLE_NOTARY_ISSUER_ID != '' && env.APPLE_NOTARY_PRIVATE_KEY != ''
+        if: runner.os == 'macOS' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_NOTARY_KEY_ID != '' && secrets.APPLE_NOTARY_ISSUER_ID != '' && secrets.APPLE_NOTARY_PRIVATE_KEY != ''
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
@@ -121,21 +132,21 @@ jobs:
             --output-format json | tee notary-result.json
 
       - name: Validate macOS code signature
-        if: runner.os == 'macOS' && env.MACOS_CODESIGN_IDENTITY != ''
-        env:
-          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        if: runner.os == 'macOS'
         run: |
           codesign --verify --deep --strict --verbose=2 dist/Fuselapse
           codesign -dv --verbose=4 dist/Fuselapse
 
       - name: Validate notarization result
-        if: runner.os == 'macOS' && env.APPLE_TEAM_ID != '' && env.APPLE_NOTARY_KEY_ID != '' && env.APPLE_NOTARY_ISSUER_ID != '' && env.APPLE_NOTARY_PRIVATE_KEY != ''
+        if: runner.os == 'macOS' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_NOTARY_KEY_ID != '' && secrets.APPLE_NOTARY_ISSUER_ID != '' && secrets.APPLE_NOTARY_PRIVATE_KEY != ''
         run: |
           python3 -c "import json, pathlib, sys; data=json.loads(pathlib.Path('notary-result.json').read_text()); status=data.get('status'); print(f'Notarization status: {status}'); sys.exit(0 if status == 'Accepted' else 1)"
 
       - name: Clean up macOS signing material
         if: runner.os == 'macOS' && always()
         run: |
+          rm -f macos-entitlements.plist
+          rm -f codesign-details.txt
           rm -f developer-id.p12
           rm -f notary-result.json
           rm -f "$HOME/.private_keys"/AuthKey_*.p8

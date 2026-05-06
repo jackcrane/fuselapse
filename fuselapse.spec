@@ -6,6 +6,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 project_root = Path.cwd()
 ffmpeg_path = os.environ.get("FUSELAPSE_FFMPEG")
+codesign_identity = os.environ.get("MACOS_CODESIGN_IDENTITY") or None
+entitlements_file = os.environ.get("MACOS_ENTITLEMENTS_FILE") or None
 if not ffmpeg_path:
     raise SystemExit("FUSELAPSE_FFMPEG must point to the ffmpeg binary to bundle.")
 
@@ -51,6 +53,6 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity=codesign_identity,
+    entitlements_file=entitlements_file,
 )
