@@ -15,6 +15,7 @@ from src.config import (
     BOX_SIZE,
     CHECK_REGION_LINES,
     CHECK_REGIONS,
+    LOG_LUMINANCE_DEFAULT,
     LUMINANCE_THRESHOLD_PCT,
     MAX_SCREEN_RATIO,
     SHOW_LUMINANCE_DEFAULT,
@@ -288,6 +289,7 @@ class VideoWidget(QWidget):
         self.current_frame = 0
         self.dragging_idx = None
         self.show_luminance = SHOW_LUMINANCE_DEFAULT
+        self.log_luminance = LOG_LUMINANCE_DEFAULT
         self.progress_preview_enabled = False
         self.luminance_threshold_pct = LUMINANCE_THRESHOLD_PCT
         self.back_frame_offset_count = BACK_FRAME_OFFSET_COUNT
@@ -296,6 +298,10 @@ class VideoWidget(QWidget):
             CHECK_REGION_LINES,
             self._get_region_threshold_states(),
         )
+        if self.log_luminance:
+            print(
+                "frameNumber,positiveRegion1,negativeRegion1,positiveRegion2,negativeRegion2"
+            )
 
     def cleanup(self):
         self.cap.release()
@@ -382,6 +388,22 @@ class VideoWidget(QWidget):
 
     def _print_matching_trigger_frames(self):
         return
+
+    def _log_current_frame_luminance_csv(self):
+        if not self.log_luminance:
+            return
+
+        current_luminance_pcts = self._get_current_frame_luminance_pcts()
+        ordered_region_indexes = [
+            region_index
+            for region_pair in CHECK_REGION_LINES
+            for region_index in region_pair
+        ]
+        ordered_luminance_pcts = [
+            str(current_luminance_pcts[region_index])
+            for region_index in ordered_region_indexes
+        ]
+        print(",".join([str(self.current_frame), *ordered_luminance_pcts]))
 
     def _load_frame(self, frame_index):
         clamped_frame_index = max(0, min(self.total_frames - 1, frame_index))
@@ -497,7 +519,10 @@ class VideoWidget(QWidget):
         )
 
     def set_frame(self, frame_index, emit_matches=True):
+        previous_frame = self.current_frame
         if self._load_frame(frame_index):
+            if self.current_frame != previous_frame:
+                self._log_current_frame_luminance_csv()
             if emit_matches:
                 self._print_matching_trigger_frames()
 
